@@ -3,7 +3,6 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 
-// Hardcoded MongoDB URL
 const uri = "mongodb+srv://amalkarthik_ADMIN:Amal1122Karthik@cluster0.w7y8k.mongodb.net/myDatabase?retryWrites=true&w=majority&appName=Cluster0";
 if (!uri) {
   console.error("Error: MONGO_URL is not defined.");
@@ -14,6 +13,7 @@ const client = new MongoClient(uri, {
   connectTimeoutMS: 5000,
   serverSelectionTimeoutMS: 5000,
   tls: true,
+  tlsAllowInvalidCertificates: true, // For testing only; remove in production
 });
 
 const app = express();
@@ -23,7 +23,7 @@ let db;
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*", // Allow all for now; restrict to your app later
+    origin: "*",
     methods: ["GET", "POST"],
   },
 });
@@ -45,7 +45,7 @@ async function connectToDatabase() {
 async function startServer() {
   await connectToDatabase();
   app.use(express.json());
-  app.use(express.static('public')); // Optional
+  app.use(express.static('public'));
 
   app.get('/', (req, res) => {
     res.send("Chat server is running and connected to MongoDB Atlas!");
