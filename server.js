@@ -79,7 +79,7 @@ async function startServer() {
           lastMessage: conv.lastMessage?.content || '',
           time: conv.lastMessage?.timestamp || conv.createdAt,
           unread: await db.collection('messages').countDocuments({
-            conversationId: ObjectId(conv._id),
+            conversationId: conv._id, // Use ObjectId directly
             senderId: { $ne: userId },
             isRead: false
           })
@@ -101,7 +101,7 @@ async function startServer() {
       }
 
       const newMessage = {
-        conversationId: ObjectId(conversationId),
+        conversationId: new ObjectId(conversationId), // Use new ObjectId
         senderId,
         content,
         timestamp: new Date(),
@@ -112,14 +112,14 @@ async function startServer() {
       const result = await messagesCollection.insertOne(newMessage);
 
       await db.collection('conversations').updateOne(
-        { _id: ObjectId(conversationId) },
+        { _id: new ObjectId(conversationId) }, // Use new ObjectId
         { $set: { 
           lastMessage: { content, senderId, timestamp: newMessage.timestamp },
           updatedAt: new Date()
         }}
       );
 
-      const conversation = await db.collection('conversations').findOne({ _id: ObjectId(conversationId) });
+      const conversation = await db.collection('conversations').findOne({ _id: new ObjectId(conversationId) }); // Use new ObjectId
       conversation.participants.forEach(participantId => {
         io.to(participantId).emit('newMessage', { ...newMessage, _id: result.insertedId });
       });
@@ -135,7 +135,7 @@ async function startServer() {
     try {
       const { conversationId } = req.params;
       const messages = await db.collection('messages')
-        .find({ conversationId: ObjectId(conversationId) })
+        .find({ conversationId: new ObjectId(conversationId) }) // Use new ObjectId
         .sort({ timestamp: 1 })
         .toArray();
 
