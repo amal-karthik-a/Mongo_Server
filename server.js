@@ -2,17 +2,14 @@ const { MongoClient, ObjectId } = require('mongodb');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const admin = require('firebase-admin');
 
-// Initialize Firebase Admin SDK
-const serviceAccount = require('./path-to-your-service-account-key.json'); // Replace with your Firebase service account key path
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
-const dbFirestore = admin.firestore();
+// Hardcoded MongoDB URL (from your .env)
+const uri = "mongodb+srv://amalkarthik_ADMIN:Amal1122Karthik@cluster0.w7y8k.mongodb.net/myDatabase?retryWrites=true&w=majority&appName=Cluster0";
+if (!uri) {
+  console.error("Error: MONGO_URL is not defined.");
+  process.exit(1);
+}
 
-// MongoDB connection
-const uri = "mongodb+srv://amalkarthik_ADMIN:Amal1122Karthik@cluster0.w7y8k.mongodb.net/myDatabase?retryWrites=true&w=majority";
 const client = new MongoClient(uri, {
   connectTimeoutMS: 5000,
   serverSelectionTimeoutMS: 5000,
@@ -26,7 +23,7 @@ let db;
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*", // Adjust in production to your frontend URL
+    origin: "*", // Allow all for now; restrict to your frontend URL in production
     methods: ["GET", "POST"],
   },
 });
@@ -48,7 +45,7 @@ async function connectToDatabase() {
 async function startServer() {
   await connectToDatabase();
   app.use(express.json());
-  app.use(express.static('public')); // Optional: Serve static files if needed
+  app.use(express.static('public')); // Optional: Serve static files if you have a 'public' folder
 
   app.get('/', (req, res) => {
     res.send("Chat server is running and connected to MongoDB Atlas!");
@@ -66,7 +63,7 @@ async function startServer() {
 
   app.get('/conversations/:userId', async (req, res) => {
     try {
-      const { userId } = req.params; // userId is the email (e.g., amal.karthik2026@gmail.com)
+      const { userId } = req.params;
       const conversations = await db.collection('conversations')
         .find({ participants: userId })
         .sort({ 'lastMessage.timestamp': -1 })
@@ -74,26 +71,18 @@ async function startServer() {
 
       const populatedConversations = await Promise.all(conversations.map(async (conv) => {
         const otherParticipantId = conv.participants.find(id => id !== userId);
-        let participant;
-        try {
-          // Fetch user details from Firestore using the email as the document ID
-          const userDoc = await dbFirestore.collection('users').doc(otherParticipantId).get();
-          participant = userDoc.exists ? userDoc.data() : null;
-        } catch (error) {
-          console.error(`Error fetching user ${otherParticipantId} from Firestore:`, error.message);
-          participant = null;
-        }
+        const participant = await db.collection('users').findOne({ _id: otherParticipantId });
         return {
           id: conv._id.toString(),
-          name: participant ? `${participant.fname} ${participant.lname || ''}`.trim() : "Unknown",
-          avatar: participant?.propic || 'https://randomuser.me/api/portraits/men/1.jpg',
+          name: participant?.username || "Unknown",
+          avatar: participant?.avatar || 'https://randomuser.me/api/portraits/men/1.jpg',
           lastMessage: conv.lastMessage?.content || '',
           time: conv.lastMessage?.timestamp || conv.createdAt,
           unread: await db.collection('messages').countDocuments({
             conversationId: ObjectId(conv._id),
             senderId: { $ne: userId },
             isRead: false
-          }),
+          })
         };
       }));
 
@@ -122,19 +111,12 @@ async function startServer() {
       const messagesCollection = db.collection('messages');
       const result = await messagesCollection.insertOne(newMessage);
 
-      // Update the conversation's lastMessage field
       await db.collection('conversations').updateOne(
         { _id: ObjectId(conversationId) },
-        {
-          $set: {
-            lastMessage: {
-              content,
-              senderId,
-              timestamp: newMessage.timestamp,
-            },
-            updatedAt: new Date(),
-          },
-        }
+        { $set: { 
+          lastMessage: { content, senderId, timestamp: newMessage.timestamp },
+          updatedAt: new Date()
+        }}
       );
 
       const conversation = await db.collection('conversations').findOne({ _id: ObjectId(conversationId) });
@@ -158,18 +140,11 @@ async function startServer() {
         .toArray();
 
       const populatedMessages = await Promise.all(messages.map(async (msg) => {
-        let sender;
-        try {
-          const userDoc = await dbFirestore.collection('users').doc(msg.senderId).get();
-          sender = userDoc.exists ? userDoc.data() : null;
-        } catch (error) {
-          console.error(`Error fetching user ${msg.senderId} from Firestore:`, error.message);
-          sender = null;
-        }
+        const sender = await db.collection('users').findOne({ _id: msg.senderId });
         return {
           ...msg,
           _id: msg._id.toString(),
-          avatar: sender?.propic || 'https://randomuser.me/api/portraits/men/1.jpg',
+          avatar: sender?.avatar || 'https://randomuser.me/api/portraits/men/1.jpg'
         };
       }));
 
@@ -185,11 +160,20 @@ async function startServer() {
 
     socket.on('join', (userId) => {
       socket.join(userId);
+      db.collection('users').updateOne(
+        { _id: userId },
+        { $set: { status: 'online', socketId: socket.id } },
+        { upsert: true }
+      );
       console.log(`User ${userId} joined with socket ${socket.id}`);
     });
 
     socket.on('disconnect', () => {
       console.log('User disconnected:', socket.id);
+      db.collection('users').updateOne(
+        { socketId: socket.id },
+        { $set: { status: 'offline', socketId: null } }
+      );
     });
   });
 
